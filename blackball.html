@@ -1,1 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>３Ｄ黒球危機一髪</title>
+<script src="three.js"></script>
+<script>
+let scene, camera, renderer;                //シーン、カメラ、レンダラー
+const width = 600, height = 600;            //幅、高さ
+let color = new Array(4);                   //剣のマテリアル（4色）
+const player = ["赤", "緑", "青","黄色"];   //プレイヤー（剣の色）
+let ball, black;                            //ボール、ボールのマテリアル（黒）
+let cAngle = 0, num = 0;                    //カメラの角度、剣の数
+let status = "ready";                       //ステータス（ready/start)
 
+const init = () => {
+    //シーン
+    scene = new THREE.Scene();
+    //カメラ（画角：50、ニアクリップ：１，ファークリップ：1000）
+    camera = new THREE.PerspectiveCamera(50, width/height, 1, 1000);
+    //レンダラー
+    renderer = new THREE.WebGLRenderer({antialias: true});
+    renderer.setSize(width, height);
+    renderer.shadowMap.enabled = true;                                      //影の描写を有効に
+    document.getElementById("renderArea").appendChild(renderer.domElement); //描画エリア（165行）に作成
+    //ライト（平行光源、環境光）
+    const light = new THREE.DirectionalLight("#FFFFFF");                    //白色の平行光源
+    light.position.set(10, 20, 10);
+    light.castShadow = true;
+    scene.add(light);
+    const ambientLight = new THREE.AmbientLight("#666666");                 //グレーの環境光
+　　scene.add(ambientLight);
+    //マテリアル
+    color[0] = new THREE.MeshPhongMaterial({color: "#FF3333", shininess:100});
+    color[1] = new THREE.MeshPhongMaterial({color: "#33FF33", shininess:100});
+    color[2] = new THREE.MeshPhongMaterial({color: "#3333FF", shininess:100});
+    color[3] = new THREE.MeshPhongMaterial({color: "#FFFF33", shininess:100});  //赤、緑、青、黄色、光沢あり
+    black = new THREE.MeshPhongMaterial({color: "#333333", shininess:100});     //グレー、光沢あり
+    //ボール
+    const sphere = new THREE.SphereGeometry(1.5, 24, 24);                       //半径1.5の球
+    ball = new THREE.Mesh(sphere, black);
+    ball.position.set(0, 2.5, 0);                                              //球の位置
+    ball.castShadow = true;
+    scene.add(ball);
+    //樽
+    const cylinder = new THREE.CylinderGeometry(2, 2, 5, 64);                   //半径２，高さ5の円柱
+    const barrelColor = new THREE.MeshLambertMaterial({color: "#6699CC"});       //濃い水色
+    const barrel = new THREE.Mesh(cylinder, barrelColor);
+    barrel.position.set(0, 0, 0);
+    barrel.castShadow = true;                                                   //影を落とす
+    barrel.receiveShadow = true;                                                //影を受ける
+    scene.add(barrel);
+    //床
+    const box = new THREE.BoxGeometry(8, 1, 8);                                  //8×8、高さ1の直方体
+    const white = new THREE.MeshLambertMaterial({color: "#CCCCCC"});            //色はグレー
+    const floor = new THREE.Mesh(box, white);
+    floor.position.set(0, -3, 0);
+    floor.receiveShadow = true;
+    scene.add(floor);
+    //キー／マウスイベントの登録
+    document.addEventListener("keydown", moveCamera);                           //キーを押したときにmoveCamera()関数、マウスボタンを押したときにstab()関数を実行
+    document.addEventListener("mousedown", stab);
+    //ゲームスタート
+    startGame();
+}
+
+const startGame = () => {
+    //穴、剣の削除
+    for (let i= scene.children.length-1; i>=0; i--) {                           //シーンに追加された全要素を走査
+        const child = scene.children[i];
+        if (child.name != "") {                                                 //名前（穴はhole、またはlucky、剣はswordがついているなら
+            scene.remove(child);
+            child.material.dispose();
+            child.geometry.dispose();                                           //要素を削除
+        }
+    }
+    //ボールの色を黒に戻す
+    ball.material = black;
+    //穴の作成
+    const lucky = Math.floor(Math.random() * 32);                               //0～31の乱数（＝当たり穴の番号）
+    const box = new THREE.BoxGeometry(0.1, 0.5, 0.2);                           //0.1×0.2、高さ0.5の直方体
+    let cnt = 0;
+    for (let i=-2; i<2; i++) {
+        for (let j=0; j<8; j++) {                                               //穴は4段×8段（32個）
+            const hole = new THREE.Mesh(box, black);
+            const angle = j * Math.PI/4 + i * Math.PI/8;                        //穴を回転させる
+            hole.rotation.y = -angle;
+            const x = 2 * Math.cos(angle);                                      //穴の位置を計算
+            const z = 2 * Math.sin(angle);
+            hole.position.set(x, i + 0.5, z);
+            hole.name = "hole";
+            if (cnt == lucky) hole.name = "lucky";                              //当たり穴の名前をluckyに、それ以外の穴はhole
+            scene.add(hole);
+            cnt++;
+        }
+    }
+    //カメラの初期位置
+    cAngle = 0;
+    camera.position.set(10 * Math.cos(cAngle), 5, 10 * Math.sin(cAngle));
+    camera.lookAt(scene.position);                                              //カメラは原点を向く
+    //ゲームスタート
+    num = 0;
+    status = "start";
+    document.getElementById("message").innerHTML = `【${player[0]}】の番`;      //メッセージ（162行）に色と「の番」を表示
+    document.getElementById("num").innerHTML = 32;                              //残り件数（163行）に32と表示
+    renderer.render(scene, camera);                                             //画面描画
+}
+
+const moveCamera = event => {
+    //方向キーが押されたときにカメラの位置を変更
+    if (event.key == "ArrowLeft") cAngle += 0.1;                                //カーソルキーの左矢印で角度を増やし、右矢印で減らす
+    if (event.key == "ArrowRight") cAngle -= 0.1;
+    camera.position.set(10 * Math.cos(cAngle), 5, 10 * Math.sin(cAngle));       //カメラの位置（半径10でy軸を中心に回転する）
+    camera.lookAt(scene.position);
+    renderer.render(scene, camera);   
+}
+
+const stab = event => {
+    //マウス座標の変換
+    const mouse = new THREE.Vector2();
+    const rect = event.target.getBoundingClientRect();                          //描画エリア内のマウスカーソルの座標
+    mouse.x = event.clientX - rect.left;
+    mouse.y = event.clientY - rect.top;
+    mouse.x = mouse.x / width * 2 - 1;                                          //-1～1、右と上がプラスの座標系に変換
+    mouse.y = mouse.y / height * (-2) + 1;    
+    //レイキャストの作成
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);                                     //カメラからマウスに向かう透明な線（レイキャスト）を作成
+    const intersects = raycaster.intersectObjects(scene.children);              //レイキャストと３Ｄオブジェクトとの交差を調べる
+    if ((status == "start") && (intersects.length > 0)) {
+        const name = intersects[0].object.name;
+        if ((name == "hole") || (name == "lucky")) {                            //穴と交差しているとき
+        //剣を刺す
+        intersects[0].object.visible = false;
+        const box = new THREE.BoxGeometry(1.5, 0.5, 0.2);                       //穴を消して、1.5×0.2、高さ0.5の直方体の剣を作成
+        const sword = new THREE.Mesh(box, color[num%4]);                        //剣の色は、赤、緑、青、黄色
+        sword.name = "sword";
+        sword.rotation.copy(intersects[0].object.rotation);                     //剣の回転角度と位置はクリックした穴と同じ
+        sword.position.copy(intersects[0].object.position);
+        sword.castShadow = true;
+        sword.receiveShadow = true;
+        scene.add(sword);
+        let message = `【${player[(num+1)%4]}】の番`;
+        if (name == "lucky") {                                                  //当たり穴の時
+            //当たり
+            ball.material = color[num%4];
+            message = `【${player[(num)%4]}】の価値`;
+            status = "ready";       
+        }
+        num++;
+        document.getElementById("message").innerText = message;
+        document.getElementById("num").innerText = 32 - num;
+    }
+    renderer.render(scene, camera);
+  }
+}
+</script>
+</head>
+<body onload="init()">
+<p>黒球危機一髪</p>
+<input type="button" id="start" value="はじめから" onclick="startGame()">
+<span id="message"></span>
+(残り：<span id="num">32</span>)/32
+<hr>
+<div id="renderArea"></div>
+[←][→]：回転
+</body>
+</html>
